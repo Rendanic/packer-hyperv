@@ -1,0 +1,8 @@
+# Taskfile.yml
+version: '3'
+
+includes:
+  hyperv:
+    taskfile: ./Taskfiles/hyperv
+    aliases:
+      - ps

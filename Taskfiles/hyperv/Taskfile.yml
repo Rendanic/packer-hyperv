@@ -1,0 +1,11 @@
+# Taskfile.yml
+version: '3'
+
+tasks:
+
+  packer-ubuntu24.04:
+    platforms: ["windows"]
+    desc: Build template VM with packer for Ubuntu 24.04
+    dir: ./ubuntu-24.04/
+    cmds:
+      - packer build ubuntu-k8s-hyperv.pkr.hcl

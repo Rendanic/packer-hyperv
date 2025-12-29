@@ -1,0 +1,45 @@
+= Packer for Hyper-V
+
+== Why this project?
+
+In the past, I operated my environments using Vagrant + VirtualBox. Since VirtualBox could not run in parallel with Hyper-V, I abandoned the concept and switched to Hyper-V. Unfortunately, it turned out that Vagrant and Hyper-V require a lot of tinkering, so I also gave up on Vagrant and instead build the VMs with Packer on Hyper-V, replacing Vagrant’s functionality with targeted PowerShell scripts.
+
+This repository contains everything needed to build VMs that can later serve as base images in Hyper-V.
+
+The project is currently still in development.
+
+== Installation
+
+=== Requirements
+
+- Windows with enabled Hyper-V
+- Powershell
+- Hashicorp Packer
+- go-Task as Helper
+
+=== Install scoop
+
+This step is *not* mandatory.
+You could install `packer` and `go-task` manually by your own.
+
+Anyone who prefers the most convenient installation method can use `scoop` as a package manager.
+
+https://github.com/ScoopInstaller/Scoop[scoop Homepage]
+
+.Install sccop
+----
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+----
+
+.Install needed tools with scoop
+----
+scoop install packer
+scoop install task
+----
+
+== Building Images
+
+=== Preparation
+
+Through the automated installation, the VMs receive a configurable SSH public key that can later be used for login. Currently, the key is still hardcoded in the Packer template, but it will be configurable via a parameter in the future.

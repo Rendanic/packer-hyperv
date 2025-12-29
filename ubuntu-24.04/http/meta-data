@@ -1,0 +1,4 @@
+# http/meta-data
+# Required for autoinstall
+# instance-id: ubuntu-template
+# local-hostname: ubuntu-template
