@@ -3,9 +3,30 @@ version: '3'
 
 tasks:
 
+  hyperv-add-admin-user:
+    desc: Add current OS User to group Hyper-V Administrators
+    platforms: ["windows"]
+    cmds:
+      - powershell -Command  'if (!(Get-LocalGroup "Hyper-V Administrators" -EA SilentlyContinue)) { New-LocalGroup "Hyper-V Administrators" }'
+ 
   packer-ubuntu24.04:
     platforms: ["windows"]
     desc: Build template VM with packer for Ubuntu 24.04
     dir: ./ubuntu-24.04/
+    var:
+      SSH_KEY=%USERPROFILE%\.ssh\id_ed25519.pub
     cmds:
-      - packer build ubuntu-k8s-hyperv.pkr.hcl
+      - packer build -var=ssh_public_key_path=%USERPROFILE%\.ssh\id_ed25519.pub ubuntu-k8s-hyperv.pkr.hcl
+
+  packer-ol9:
+    platforms: ["windows"]
+    desc: Build template VM with packer for Ubuntu 24.04
+    dir: ./OL9/
+    vars:
+      # USER_HOME:
+      #   sh: echo %USERPROFILE%
+      # SSH_KEY_FILE: '{{.USER_HOME}}\.ssh\id_ed25519.pub'
+      SSH_KEY_FILE: C:\Users\thors\.ssh\id_ed25519.pub
+    cmds:
+      - echo "{{.SSH_KEY_FILE}}"
+      - packer build -var "ssh_public_key_path={{.SSH_KEY_FILE}}" oracle-linux-9.pkr.hcl
