@@ -9,3 +9,10 @@ tasks:
     dir: ./ubuntu-24.04/
     cmds:
       - packer build ubuntu-k8s-hyperv.pkr.hcl
+
+  packer-ubuntu26.04:
+    platforms: ["windows"]
+    desc: Build template VM with packer for Ubuntu 26.04
+    dir: ./ubuntu-26.04/
+    cmds:
+      - packer build ubuntu-k8s-hyperv.pkr.hcl
