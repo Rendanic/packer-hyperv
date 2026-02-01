@@ -2,7 +2,7 @@
 # Creates VMs with two network adapters: Default Switch (DHCP) + External Switch (Fixed IP)
 
 param(
-    [string]$OutputDir = "output-ol9",
+    [string]$OutputDir = "output-ol8",
     [string]$NewVMName = "ansible-oracle-1",
     [string]$Hostname = "ansible-oracle-1",
     [string]$ExternalSwitch = "intern_66",  # Name of your external switch
@@ -56,8 +56,8 @@ $vm = New-VM -Name $NewVMName `
 Set-VM -Name $NewVMName `
        -ProcessorCount $CPUs `
         -DynamicMemory `
-        -MemoryStartupBytes (5GB) `
-        -MemoryMinimumBytes (5GB) `
+        -MemoryStartupBytes (6GB) `
+        -MemoryMinimumBytes (6GB) `
         -MemoryMaximumBytes ($MemoryGB * 2GB) `
        -CheckpointType Disabled
 

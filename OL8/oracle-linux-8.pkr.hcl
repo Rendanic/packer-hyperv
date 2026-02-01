@@ -9,12 +9,12 @@ packer {
 
 variable "iso_url" {
   type    = string
-  default = "https://yum.oracle.com/ISOS/OracleLinux/OL9/u5/x86_64/OracleLinux-R9-U5-x86_64-dvd.iso"
+  default = "https://yum.oracle.com/ISOS/OracleLinux/OL8/u10/x86_64/OracleLinux-R8-U10-x86_64-dvd.iso"
 }
 
 variable "iso_checksum" {
   type    = string
-  default = "sha256:c2fa76c502cf1d93dfbd084d494d963ab7ea0a6f5535a083b8547b34037e88e1"
+  default = "sha256:7676a80eeaafa16903eebb2abba147a3afe230b130cc066d56fdd6854d8da900"
 }
 
 variable "ssh_public_key_path" {
@@ -22,8 +22,8 @@ variable "ssh_public_key_path" {
   default = "c:\\Users\\TBR\\.ssh\\id_ed25519.pub"
 }
 
-source "hyperv-iso" "ol9" {
-  vm_name          = "ol9-template"
+source "hyperv-iso" "ol8" {
+  vm_name          = "ol8-template"
   generation       = 1
   cpus             = 2
   memory           = 4096
@@ -52,11 +52,11 @@ source "hyperv-iso" "ol9" {
   
   shutdown_command = "sudo /sbin/shutdown -h now"
   
-  output_directory = "output-ol9"
+  output_directory = "output-ol8"
 }
 
 build {
-  sources = ["source.hyperv-iso.ol9"]
+  sources = ["source.hyperv-iso.ol8"]
   
   # Setup SSH directory
   provisioner "shell" {
@@ -86,7 +86,7 @@ build {
   provisioner "shell" {
     inline = [
       "sudo dnf -y update",
-      "sudo dnf -y install cloud-init cloud-utils-growpart hyperv-daemons",
+      "sudo dnf -y install cloud-init cloud-utils-growpart hyperv-daemons python3",
       "sudo systemctl enable hypervkvpd hypervvssd hypervfcopyd",
       "sudo dnf clean all",
       "sudo rm -rf /var/cache/dnf",

@@ -18,9 +18,22 @@ tasks:
     cmds:
       - packer build -var=ssh_public_key_path=%USERPROFILE%\.ssh\id_ed25519.pub ubuntu-k8s-hyperv.pkr.hcl
 
+  packer-ol8:
+    platforms: ["windows"]
+    desc: Build template VM with packer for OL8
+    dir: ./OL8/
+    vars:
+      # USER_HOME:
+      #   sh: echo %USERPROFILE%
+      # SSH_KEY_FILE: '{{.USER_HOME}}\.ssh\id_ed25519.pub'
+      SSH_KEY_FILE: C:\Users\thors\.ssh\id_ed25519.pub
+    cmds:
+      - echo "{{.SSH_KEY_FILE}}"
+      - packer build -var "ssh_public_key_path={{.SSH_KEY_FILE}}" oracle-linux-8.pkr.hcl
+
   packer-ol9:
     platforms: ["windows"]
-    desc: Build template VM with packer for Ubuntu 24.04
+    desc: Build template VM with packer for OL9
     dir: ./OL9/
     vars:
       # USER_HOME:
