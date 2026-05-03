@@ -12,8 +12,13 @@ param(
     [string]$DNS2 = "8.8.4.4",             # Secondary DNS
     [int]$CPUs = 2,
     [int]$MemoryGB = 8,
-    [string]$SSHKeyPath = "$env:USERPROFILE\.ssh\id_ed25519"
+    [string]$SSHKeyPath = ""
 )
+
+# Set SSH key default path if not specified
+if ([string]::IsNullOrEmpty($SSHKeyPath)) {
+    $SSHKeyPath = "$env:USERPROFILE\.ssh\id_ed25519"
+}
 
 # Use VM name as hostname if not specified
 if ([string]::IsNullOrEmpty($Hostname)) {
@@ -108,7 +113,8 @@ try {
     Write-Host "Applying configuration..." -ForegroundColor Gray
     $commands = @(
         "echo 'device status' ; sudo nmcli device status",
-        "echo 'connection add type' ; sudo nmcli connection add type ethernet con-name eth1-static ifname eth1 ipv4.method manual ipv4.addresses 192.168.66.162/24 ipv4.dns '8.8.8.8,8.8.4.4'",
+        # ÄNDERUNG: Hardcodierte IP ersetzt durch Parameter $FixedIP, $Subnet, $DNS1, $DNS2
+        "echo 'connection add type' ; sudo nmcli connection add type ethernet con-name eth1-static ifname eth1 ipv4.method manual ipv4.addresses ${FixedIP}/${Subnet} ipv4.dns '${DNS1},${DNS2}'",
         "ip a l"
     )
     

@@ -43,3 +43,13 @@ scoop install task
 === Preparation
 
 Through the automated installation, the VMs receive a configurable SSH public key that can later be used for login. Currently, the key is still hardcoded in the Packer template, but it will be configurable via a parameter in the future.
+
+== Deploy VM from Image
+
+=== OL9
+
+.Create VM with PowerShell
+----
+cd OL9
+.\create-vm.ps1 -NewVMName "oracle-vm-1" -FixedIP "192.168.66.200" -MemoryGB 16
+----
