@@ -1,7 +1,7 @@
 packer {
   required_plugins {
     hyperv = {
-      version = ">= 1.1.3"
+      version = ">= 1.1.5"
       source  = "github.com/hashicorp/hyperv"
     }
   }

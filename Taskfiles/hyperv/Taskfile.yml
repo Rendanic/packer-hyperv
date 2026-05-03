@@ -22,12 +22,16 @@ tasks:
     platforms: ["windows"]
     desc: Build template VM with packer for OL8
     dir: ./OL8/
+    env:
+      PACKER_PLUGIN_PATH: "{{.TASKFILE_DIR}}/OL8/plugins"
     vars:
       # USER_HOME:
       #   sh: echo %USERPROFILE%
       # SSH_KEY_FILE: '{{.USER_HOME}}\.ssh\id_ed25519.pub'
       SSH_KEY_FILE: C:\Users\thors\.ssh\id_ed25519.pub
     cmds:
+      - packer init -upgrade .
+      - packer plugins installed
       - echo "{{.SSH_KEY_FILE}}"
       - packer build -var "ssh_public_key_path={{.SSH_KEY_FILE}}" oracle-linux-8.pkr.hcl
 
@@ -35,11 +39,15 @@ tasks:
     platforms: ["windows"]
     desc: Build template VM with packer for OL9
     dir: ./OL9/
+    env:
+      PACKER_PLUGIN_PATH: "{{.TASKFILE_DIR}}/OL9/plugins"
     vars:
       # USER_HOME:
       #   sh: echo %USERPROFILE%
       # SSH_KEY_FILE: '{{.USER_HOME}}\.ssh\id_ed25519.pub'
       SSH_KEY_FILE: C:\Users\thors\.ssh\id_ed25519.pub
     cmds:
+      - packer init -upgrade .
+      - packer plugins installed
       - echo "{{.SSH_KEY_FILE}}"
       - packer build -var "ssh_public_key_path={{.SSH_KEY_FILE}}" oracle-linux-9.pkr.hcl
