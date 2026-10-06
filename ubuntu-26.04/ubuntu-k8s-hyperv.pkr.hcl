@@ -60,7 +60,7 @@ source "hyperv-iso" "ubuntu-base" {
   iso_url      = var.iso_url
   iso_checksum = var.iso_checksum
   # VM Configuration
-  vm_name              = "packer-ubuntu-k8s-base"
+  vm_name              = "packer-ubuntu-26.04"
   generation           = 2
   enable_secure_boot   = false
   enable_tpm           = false
