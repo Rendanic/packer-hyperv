@@ -6,19 +6,14 @@ param(
     [string]$NewVMName = "ansible-oracle-1",
     [string]$Hostname = "ansible-oracle-1",
     [string]$ExternalSwitch = "intern_66",  # Name of your external switch
-    [string]$FixedIP = "192.168.66.162",     # Fixed IP for Kubernetes
+    [string]$FixedIP = "192.168.66.161",     # Fixed IP for Kubernetes
     [string]$Subnet = "24",                 # Subnet mask in CIDR notation
     [string]$DNS1 = "8.8.8.8",             # Primary DNS
     [string]$DNS2 = "8.8.4.4",             # Secondary DNS
     [int]$CPUs = 2,
     [int]$MemoryGB = 8,
-    [string]$SSHKeyPath = ""
+    [string]$SSHKeyPath = "$env:USERPROFILE\.ssh\id_ed25519"
 )
-
-# Set SSH key default path if not specified
-if ([string]::IsNullOrEmpty($SSHKeyPath)) {
-    $SSHKeyPath = "$env:USERPROFILE\.ssh\id_ed25519"
-}
 
 # Use VM name as hostname if not specified
 if ([string]::IsNullOrEmpty($Hostname)) {
@@ -53,7 +48,7 @@ Copy-Item -Path $vhdxFile.FullName -Destination $newVHDPath -Force
 Write-Host "Creating VM with Default Switch..." -ForegroundColor Yellow
 $vm = New-VM -Name $NewVMName `
             -MemoryStartupBytes ($MemoryGB * 1GB) `
-            -Generation 1 `
+            -Generation 2 `
             -VHDPath $newVHDPath `
             -SwitchName "Default Switch"
 
@@ -61,12 +56,12 @@ $vm = New-VM -Name $NewVMName `
 Set-VM -Name $NewVMName `
        -ProcessorCount $CPUs `
         -DynamicMemory `
-        -MemoryStartupBytes (5GB) `
-        -MemoryMinimumBytes (5GB) `
+        -MemoryStartupBytes (3GB) `
+        -MemoryMinimumBytes (3GB) `
         -MemoryMaximumBytes ($MemoryGB * 2GB) `
        -CheckpointType Disabled
 
-# Set-VMFirmware -VMName $NewVMName -EnableSecureBoot Off
+Set-VMFirmware -VMName $NewVMName -EnableSecureBoot Off
 
 # Add second network adapter for External Switch
 Write-Host "Adding External network adapter..." -ForegroundColor Yellow
@@ -107,19 +102,45 @@ Start-Sleep -Seconds 15
 # Configure the second network interface with fixed IP via SSH
 Write-Host "Configuring fixed IP on external network..." -ForegroundColor Yellow
 
+# Create netplan configuration for the second interface
+$netplanConfig = @"
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    eth0:
+      dhcp4: true
+    eth1:
+      addresses:
+        - $FixedIP/$Subnet
+      nameservers:
+        addresses:
+          - $DNS1
+          - $DNS2
+"@
+
+# Create a temporary file with the netplan config
+$tempFile = [System.IO.Path]::GetTempFileName()
+$netplanConfig | Out-File -FilePath $tempFile -Encoding UTF8
+
 try {
+    # Copy netplan config to VM
+    Write-Host "Copying network configuration..." -ForegroundColor Gray
+    & scp -i $SSHKeyPath -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $tempFile "ubuntu@${defaultIP}:/tmp/01-netcfg.yaml" 2>$null
     
     # Apply network configuration and set hostname
     Write-Host "Applying configuration..." -ForegroundColor Gray
     $commands = @(
-        "echo 'device status' ; sudo nmcli device status",
-        # ÄNDERUNG: Hardcodierte IP ersetzt durch Parameter $FixedIP, $Subnet, $DNS1, $DNS2
-        "echo 'connection add type' ; sudo nmcli connection add type ethernet con-name eth1-static ifname eth1 ipv4.method manual ipv4.addresses ${FixedIP}/${Subnet} ipv4.dns '${DNS1},${DNS2}'",
-        "ip a l"
+        "sudo cp /tmp/01-netcfg.yaml /etc/netplan/01-netcfg.yaml",
+        "sudo chmod 600 /etc/netplan/01-netcfg.yaml",
+        "sudo netplan apply",
+        "sudo hostnamectl set-hostname $Hostname",
+        "echo '$FixedIP $Hostname' | sudo tee -a /etc/hosts",
+        "sudo sed -i 's/127.0.1.1.*/127.0.1.1 $Hostname/' /etc/hosts"
     )
     
     $sshCommand = $commands -join " && "
-    & ssh -i $SSHKeyPath -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ol@$defaultIP $sshCommand 2>$null
+    & ssh -i $SSHKeyPath -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$defaultIP $sshCommand 2>$null
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Network and hostname configured successfully!" -ForegroundColor Green
@@ -128,6 +149,9 @@ try {
     }
 } catch {
     Write-Host "Could not configure via SSH. Manual configuration needed." -ForegroundColor Yellow
+} finally {
+    # Clean up temp file
+    Remove-Item -Path $tempFile -Force -ErrorAction SilentlyContinue
 }
 
 # Display summary
@@ -140,7 +164,7 @@ Write-Host "Default Switch: $defaultIP (DHCP)" -ForegroundColor Cyan
 Write-Host "External:      $FixedIP/$Subnet (Fixed)" -ForegroundColor Cyan
 Write-Host "DNS:           $DNS1, $DNS2" -ForegroundColor White
 Write-Host "`nSSH Access:" -ForegroundColor Yellow
-Write-Host "  Via Default: ssh -i $SSHKeyPath ol@$defaultIP" -ForegroundColor Gray
-Write-Host "  Via Fixed:   ssh -i $SSHKeyPath ol@$FixedIP" -ForegroundColor Gray
+Write-Host "  Via Default: ssh -i $SSHKeyPath ubuntu@$defaultIP" -ForegroundColor Gray
+Write-Host "  Via Fixed:   ssh -i $SSHKeyPath ubuntu@$FixedIP" -ForegroundColor Gray
 
 Write-Host "`nKubernetes will use the fixed IP: $FixedIP" -ForegroundColor Green

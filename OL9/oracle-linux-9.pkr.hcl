@@ -1,7 +1,7 @@
 packer {
   required_plugins {
     hyperv = {
-      version = ">= 1.1.5"
+      version = ">= 1.1.3"
       source  = "github.com/hashicorp/hyperv"
     }
   }
@@ -9,12 +9,12 @@ packer {
 
 variable "iso_url" {
   type    = string
-  default = "https://yum.oracle.com/ISOS/OracleLinux/OL9/u8/x86_64/OracleLinux-R9-U8-x86_64-dvd.iso"
+  default = "https://yum.oracle.com/ISOS/OracleLinux/OL9/u5/x86_64/OracleLinux-R9-U5-x86_64-dvd.iso"
 }
 
 variable "iso_checksum" {
   type    = string
-  default = "sha256:91bb95cb8e4d1ad1c496c9a87efcba3bf9d5ec976474910e9950a3fa8576428b"
+  default = "sha256:c2fa76c502cf1d93dfbd084d494d963ab7ea0a6f5535a083b8547b34037e88e1"
 }
 
 variable "ssh_public_key_path" {
@@ -27,7 +27,7 @@ source "hyperv-iso" "ol9" {
   generation       = 1
   cpus             = 2
   memory           = 4096
-  disk_size        = 133120
+  disk_size        = 81920
   
   iso_url          = var.iso_url
   iso_checksum     = var.iso_checksum
