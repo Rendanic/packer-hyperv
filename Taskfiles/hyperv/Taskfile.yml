@@ -1,18 +1,56 @@
 # Taskfile.yml
 version: '3'
 
+vars:
+  # override on the command line: task hyperv:packer-ol9 SSH_KEY_FILE=C:\path\to\key.pub
+  SSH_KEY_FILE: '{{.SSH_KEY_FILE | default (print .USERPROFILE "\\.ssh\\id_ed25519.pub")}}'
+
 tasks:
+
+  hyperv-add-admin-user:
+    desc: Add current OS User to group Hyper-V Administrators (run in elevated shell, log off/on afterwards)
+    platforms: ["windows"]
+    cmds:
+      # S-1-5-32-578 = builtin Hyper-V Administrators, independent of OS language ("Hyper-V-Administratoren")
+      - powershell -Command '$u = [Security.Principal.WindowsIdentity]::GetCurrent().Name; if (Get-LocalGroupMember -SID S-1-5-32-578 | Where-Object Name -eq $u) { "$u is already member of Hyper-V Administrators" } else { Add-LocalGroupMember -SID S-1-5-32-578 -Member $u -ErrorAction Stop; "Added $u - log off and on again" }'
 
   packer-ubuntu24.04:
     platforms: ["windows"]
     desc: Build template VM with packer for Ubuntu 24.04
     dir: ./ubuntu-24.04/
     cmds:
-      - packer build ubuntu-k8s-hyperv.pkr.hcl
+      - echo "{{.SSH_KEY_FILE}}"
+      - packer build -var "ssh_public_key_path={{.SSH_KEY_FILE}}" ubuntu-k8s-hyperv.pkr.hcl
 
   packer-ubuntu26.04:
     platforms: ["windows"]
     desc: Build template VM with packer for Ubuntu 26.04
     dir: ./ubuntu-26.04/
     cmds:
-      - packer build ubuntu-k8s-hyperv.pkr.hcl
+      - echo "{{.SSH_KEY_FILE}}"
+      - packer build -var "ssh_public_key_path={{.SSH_KEY_FILE}}" ubuntu-k8s-hyperv.pkr.hcl
+
+  packer-ol8:
+    platforms: ["windows"]
+    desc: Build template VM with packer for OL8
+    dir: ./OL8/
+    env:
+      # ROOT_DIR, not TASKFILE_DIR: this Taskfile is included from the repo root
+      PACKER_PLUGIN_PATH: "{{.ROOT_DIR}}/OL8/plugins"
+    cmds:
+      - packer init -upgrade .
+      - packer plugins installed
+      - echo "{{.SSH_KEY_FILE}}"
+      - packer build -var "ssh_public_key_path={{.SSH_KEY_FILE}}" oracle-linux-8.pkr.hcl
+
+  packer-ol9:
+    platforms: ["windows"]
+    desc: Build template VM with packer for OL9
+    dir: ./OL9/
+    env:
+      PACKER_PLUGIN_PATH: "{{.ROOT_DIR}}/OL9/plugins"
+    cmds:
+      - packer init -upgrade .
+      - packer plugins installed
+      - echo "{{.SSH_KEY_FILE}}"
+      - packer build -var "ssh_public_key_path={{.SSH_KEY_FILE}}" oracle-linux-9.pkr.hcl
