@@ -54,3 +54,15 @@ tasks:
       - packer plugins installed
       - echo "{{.SSH_KEY_FILE}}"
       - packer build -var "ssh_public_key_path={{.SSH_KEY_FILE}}" oracle-linux-9.pkr.hcl
+
+  packer-ol10:
+    platforms: ["windows"]
+    desc: Build template VM with packer for OL10
+    dir: ./OL10/
+    env:
+      PACKER_PLUGIN_PATH: "{{.ROOT_DIR}}/OL10/plugins"
+    cmds:
+      - packer init -upgrade .
+      - packer plugins installed
+      - echo "{{.SSH_KEY_FILE}}"
+      - packer build -var "ssh_public_key_path={{.SSH_KEY_FILE}}" oracle-linux-10.pkr.hcl
