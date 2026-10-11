@@ -17,6 +17,11 @@ variable "iso_checksum" {
   default = "sha256:c2fa76c502cf1d93dfbd084d494d963ab7ea0a6f5535a083b8547b34037e88e1"
 }
 
+variable "disk_size" {
+  type    = number
+  default = 133120 # MB = 130 GB (dynamic VHDX, only used space is allocated)
+}
+
 variable "ssh_public_key_path" {
   type    = string
   default = "c:\\Users\\TBR\\.ssh\\id_ed25519.pub"
@@ -27,7 +32,7 @@ source "hyperv-iso" "ol9" {
   generation       = 1
   cpus             = 2
   memory           = 4096
-  disk_size        = 81920
+  disk_size        = var.disk_size
   
   iso_url          = var.iso_url
   iso_checksum     = var.iso_checksum
