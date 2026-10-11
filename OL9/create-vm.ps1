@@ -5,14 +5,15 @@
 param(
     [string]$OutputDir = "output-ol9",
     [string]$NewVMName = "ansible-oracle-1",
-    [string]$Hostname = "ansible-oracle-1", # Short name, FQDN becomes <Hostname>-<FixedIP>.nip.io
+    [string]$Hostname = "ansible-oracle-1", # Short name, FQDN becomes <Hostname>.<FixedIP>.nip.io
     [string]$ExternalSwitch = "intern_66",  # Name of your external switch
     [string]$FixedIP = "192.168.66.161",     # Fixed IP on the external switch
     [string]$Subnet = "24",                 # Subnet mask in CIDR notation
     [string]$DNS1 = "8.8.8.8",             # Primary DNS
     [string]$DNS2 = "8.8.4.4",             # Secondary DNS
     [int]$CPUs = 2,
-    [int]$MemoryGB = 8,
+    [int]$MemoryGB = 8,                     # Dynamic memory maximum = 2 x MemoryGB
+    [int]$StartupMemoryGB = 3,              # RAM assigned at boot (also the dynamic memory minimum)
     [string]$SSHUser = "ol",                # User created by the kickstart
     [string]$SSHKeyPath = "$env:USERPROFILE\.ssh\id_ed25519"
 )
@@ -26,13 +27,13 @@ if ([string]::IsNullOrEmpty($Hostname)) {
 }
 
 # Hostname is always a nip.io name derived from the fixed IP:
-#   db1 + 192.168.66.162 -> db1-192-168-66-162.nip.io
+#   db1 + 192.168.66.162 -> db1.192-168-66-162.nip.io
 $ipDashed = $FixedIP.Replace('.', '-')
 $ShortName = ($Hostname -split '\.')[0]
 if ($ShortName.EndsWith("-$ipDashed")) {
     $ShortName = $ShortName.Substring(0, $ShortName.Length - $ipDashed.Length - 1)
 }
-$Hostname = "$ShortName-$ipDashed.nip.io"
+$Hostname = "$ShortName.$ipDashed.nip.io"
 
 Write-Host "Creating VM '$NewVMName' with dual network configuration" -ForegroundColor Cyan
 Write-Host "  Default Switch: DHCP" -ForegroundColor Gray
@@ -62,7 +63,7 @@ Copy-Item -Path $vhdxFile.FullName -Destination $newVHDPath -Force
 # so the VM must be Generation 1 as well - a Gen2 (UEFI) VM would not find a bootloader.
 Write-Host "Creating VM with Default Switch..." -ForegroundColor Yellow
 New-VM -Name $NewVMName `
-       -MemoryStartupBytes ($MemoryGB * 1GB) `
+       -MemoryStartupBytes ($StartupMemoryGB * 1GB) `
        -Generation 1 `
        -VHDPath $newVHDPath `
        -SwitchName "Default Switch" | Out-Null
@@ -71,9 +72,9 @@ New-VM -Name $NewVMName `
 Set-VM -Name $NewVMName `
        -ProcessorCount $CPUs `
        -DynamicMemory `
-       -MemoryStartupBytes (3GB) `
-       -MemoryMinimumBytes (3GB) `
-       -MemoryMaximumBytes ($MemoryGB * 2GB) `
+       -MemoryStartupBytes ($StartupMemoryGB * 1GB) `
+       -MemoryMinimumBytes ($StartupMemoryGB * 1GB) `
+       -MemoryMaximumBytes ([math]::Max($MemoryGB * 2, $StartupMemoryGB) * 1GB) `
        -CheckpointType Disabled
 
 # Add second network adapter for External Switch
