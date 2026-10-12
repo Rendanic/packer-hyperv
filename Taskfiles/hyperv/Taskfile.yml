@@ -41,7 +41,8 @@ tasks:
       - packer init -upgrade .
       - packer plugins installed
       - echo "{{.SSH_KEY_FILE}}"
-      - packer build -var "ssh_public_key_path={{.SSH_KEY_FILE}}" oracle-linux-8.pkr.hcl
+      # -force: replace an existing image in output-ol8
+      - packer build -force -var "ssh_public_key_path={{.SSH_KEY_FILE}}" oracle-linux-8.pkr.hcl
 
   packer-ol9:
     platforms: ["windows"]
@@ -66,4 +67,5 @@ tasks:
       - packer init -upgrade .
       - packer plugins installed
       - echo "{{.SSH_KEY_FILE}}"
-      - packer build -var "ssh_public_key_path={{.SSH_KEY_FILE}}" oracle-linux-10.pkr.hcl
+      # -force: replace an existing image in output-ol10
+      - packer build -force -var "ssh_public_key_path={{.SSH_KEY_FILE}}" oracle-linux-10.pkr.hcl

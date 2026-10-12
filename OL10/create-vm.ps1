@@ -5,7 +5,7 @@
 param(
     [string]$OutputDir = "output-ol10",
     [string]$NewVMName = "ansible-oracle-1",
-    [string]$Hostname = "ansible-oracle-1",
+    [string]$Hostname = "ansible-oracle-1", # Short name, FQDN becomes <Hostname>.<FixedIP>.nip.io
     [string]$ExternalSwitch = "intern_66",  # Name of your external switch
     [string]$FixedIP = "192.168.66.161",     # Fixed IP on the external switch
     [string]$Subnet = "24",                 # Subnet mask in CIDR notation
@@ -25,6 +25,15 @@ $sshOpts = @("-i", $SSHKeyPath, "-o", "StrictHostKeyChecking=no", "-o", "UserKno
 if ([string]::IsNullOrEmpty($Hostname)) {
     $Hostname = $NewVMName
 }
+
+# Hostname is always a nip.io name derived from the fixed IP:
+#   db1 + 192.168.66.162 -> db1.192-168-66-162.nip.io
+$ipDashed = $FixedIP.Replace('.', '-')
+$ShortName = ($Hostname -split '\.')[0]
+if ($ShortName.EndsWith("-$ipDashed")) {
+    $ShortName = $ShortName.Substring(0, $ShortName.Length - $ipDashed.Length - 1)
+}
+$Hostname = "$ShortName.$ipDashed.nip.io"
 
 Write-Host "Creating VM '$NewVMName' with dual network configuration" -ForegroundColor Cyan
 Write-Host "  Default Switch: DHCP" -ForegroundColor Gray
@@ -154,8 +163,8 @@ nmcli connection add type ethernet con-name external ifname "`$IFACE" \
 nmcli connection up external
 
 hostnamectl set-hostname $Hostname
-sed -i '/[[:space:]]$Hostname`$/d' /etc/hosts
-echo "$FixedIP $Hostname" >> /etc/hosts
+sed -i '/[[:space:]]$Hostname\([[:space:]]\|`$\)/d' /etc/hosts
+echo "$FixedIP $Hostname $ShortName" >> /etc/hosts
 "@
 
 # Write with LF line endings and without BOM, otherwise bash fails
@@ -193,3 +202,4 @@ Write-Host "DNS:            $DNS1, $DNS2" -ForegroundColor White
 Write-Host "`nSSH Access:" -ForegroundColor Yellow
 Write-Host "  Via Default: ssh -i $SSHKeyPath $SSHUser@$defaultIP" -ForegroundColor Gray
 Write-Host "  Via Fixed:   ssh -i $SSHKeyPath $SSHUser@$FixedIP" -ForegroundColor Gray
+Write-Host "  Via nip.io:  ssh -i $SSHKeyPath $SSHUser@$Hostname" -ForegroundColor Gray
