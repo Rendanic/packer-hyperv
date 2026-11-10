@@ -1,4 +1,6 @@
 = Packer for Hyper-V
+:toc:
+:toclevels: 2
 
 == Why this project?
 
@@ -43,3 +45,43 @@ scoop install task
 === Preparation
 
 Through the automated installation, the VMs receive a configurable SSH public key that can later be used for login. Currently, the key is still hardcoded in the Packer template, but it will be configurable via a parameter in the future.
+
+== Updates with Renovate
+
+NOTE: This chapter is only relevant for maintaining this project, not for building images.
+Renovate keeps the ISO images used in the Packer templates up to date.
+
+https://docs.renovatebot.com/[Renovate] checks the ISO images in the Packer templates (`iso_url`) and creates pull requests for new versions (configuration: `renovate.json`).
+
+- Oracle Linux: new updates of the same release, e.g. OL9 U5 -> U8 (source: https://yum.oracle.com/oracle-linux-isos.html). OL8, OL9 and OL10 have their own templates, so there are no updates to the next release.
+- Ubuntu: new point releases of the same series, e.g. 24.04.3 -> 24.04.5 (source: `SHA256SUMS` on https://releases.ubuntu.com/).
+
+Renovate changes the URL. `tools/renovate/iso_checksum.sh` then sets `iso_checksum` from the official checksum list of the new ISO.
+
+=== Renovate on the CLI
+
+The tasks in `tools/renovate/Taskfile.yml` run Renovate in docker (Linux/WSL), with the same image as the scheduled job.
+A github token is taken from `RENOVATE_TOKEN` or from `gh auth token`.
+
+[cols="1,3"]
+|===
+|Task |Description
+
+|`task renovate:check`
+|Check the ISO images for updates (lookup only, working tree). `renovate.json` must be tracked by git.
+
+|`task renovate:report`
+|Show the result of the last check again (`ONLY_UPDATES=false` shows all ISO images).
+
+|`task renovate:iso:check`
+|Compare `iso_checksum` with the official checksum lists.
+
+|`task renovate:validate`
+|Validate `renovate.json`.
+
+|`task renovate:dry-run`
+|Show what Renovate would do in the github repository (`REPO`, `BASE`). `renovate.json` is read from `BASE`.
+
+|`task renovate:run`
+|Run Renovate in the github repository: creates branches and pull requests (asks before).
+|===

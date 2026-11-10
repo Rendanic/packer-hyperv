@@ -6,3 +6,6 @@ includes:
     taskfile: ./Taskfiles/hyperv
     aliases:
       - ps
+  renovate:
+    taskfile: ./tools/renovate
+    dir: "{{.ROOT_DIR}}"
