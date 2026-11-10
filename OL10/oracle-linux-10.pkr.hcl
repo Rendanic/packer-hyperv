@@ -27,7 +27,7 @@ source "hyperv-iso" "ol10" {
   generation       = 1
   cpus             = 2
   memory           = 4096
-  disk_size        = 81920
+  disk_size        = 133120
 
   iso_url          = var.iso_url
   iso_checksum     = var.iso_checksum

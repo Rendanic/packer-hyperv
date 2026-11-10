@@ -14,6 +14,7 @@ param(
     [int]$CPUs = 2,
     [int]$MemoryGB = 8,                     # Dynamic memory maximum = 2 x MemoryGB
     [int]$StartupMemoryGB = 3,              # RAM assigned at boot (also the dynamic memory minimum)
+    [int]$DataDiskGB = 0,                   # >0 adds an empty data disk (e.g. for ASM) at IDE 0:1 (/dev/sdb)
     [string]$SSHUser = "ol",                # User created by the kickstart
     [string]$SSHKeyPath = "$env:USERPROFILE\.ssh\id_ed25519"
 )
@@ -80,6 +81,22 @@ Set-VM -Name $NewVMName `
 # Add second network adapter for External Switch
 Write-Host "Adding External network adapter..." -ForegroundColor Yellow
 Add-VMNetworkAdapter -VMName $NewVMName -SwitchName $ExternalSwitch -Name "External"
+
+# Optional empty data disk (dynamic VHDX), stays unpartitioned in the guest.
+# It is attached to the same IDE controller as the boot disk (IDE 0:1), NOT to a SCSI controller:
+# Linux probes the IDE and SCSI storvsc hosts in parallel, so with a SCSI disk the device names
+# race and the data disk may become /dev/sda. On one controller the disks are scanned in order:
+# boot disk = /dev/sda, data disk = /dev/sdb. (IDE disks also use the fast hv_storvsc path.)
+# It lives in the VM directory, so removing the VM directory removes it as well.
+if ($DataDiskGB -gt 0) {
+    $dataVHDPath = Join-Path $vmPath "$NewVMName-data1.vhdx"
+    Write-Host "Adding data disk ($DataDiskGB GB)..." -ForegroundColor Yellow
+    if (Test-Path $dataVHDPath) {
+        Remove-Item -Path $dataVHDPath -Force
+    }
+    New-VHD -Path $dataVHDPath -SizeBytes ($DataDiskGB * 1GB) -Dynamic | Out-Null
+    Add-VMHardDiskDrive -VMName $NewVMName -ControllerType IDE -ControllerNumber 0 -ControllerLocation 1 -Path $dataVHDPath
+}
 
 # Start the VM
 Write-Host "Starting VM..." -ForegroundColor Yellow
@@ -199,6 +216,9 @@ Write-Host "Hostname:       $Hostname" -ForegroundColor White
 Write-Host "Default Switch: $defaultIP (DHCP)" -ForegroundColor Cyan
 Write-Host "External:       $FixedIP/$Subnet (Fixed)" -ForegroundColor Cyan
 Write-Host "DNS:            $DNS1, $DNS2" -ForegroundColor White
+if ($DataDiskGB -gt 0) {
+    Write-Host "Data disk:      $DataDiskGB GB, unpartitioned, /dev/sdb ($dataVHDPath)" -ForegroundColor White
+}
 Write-Host "`nSSH Access:" -ForegroundColor Yellow
 Write-Host "  Via Default: ssh -i $SSHKeyPath $SSHUser@$defaultIP" -ForegroundColor Gray
 Write-Host "  Via Fixed:   ssh -i $SSHKeyPath $SSHUser@$FixedIP" -ForegroundColor Gray
