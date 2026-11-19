@@ -9,7 +9,7 @@ packer {
 
 variable "iso_url" {
   type    = string
-  default = "https://yum.oracle.com/ISOS/OracleLinux/OL9/u8/x86_64/OracleLinux-R9-U8-x86_64-dvd.iso"
+  default = "https://yum.oracle.com/ISOS/OracleLinux/OL9/u9/x86_64/OracleLinux-R9-U9-x86_64-dvd.iso"
 }
 
 variable "iso_checksum" {
