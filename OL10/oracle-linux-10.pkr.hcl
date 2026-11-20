@@ -9,12 +9,12 @@ packer {
 
 variable "iso_url" {
   type    = string
-  default = "https://yum.oracle.com/ISOS/OracleLinux/OL10/u2/x86_64/OracleLinux-R10-U2-x86_64-dvd.iso"
+  default = "https://yum.oracle.com/ISOS/OracleLinux/OL10/u3/x86_64/OracleLinux-R10-U3-x86_64-dvd.iso"
 }
 
 variable "iso_checksum" {
   type    = string
-  default = "sha256:1ce70064f677e9af4ef6ff3bcd0d2de26e956236b36d2c857b533588aa06958b"
+  default = "sha256:0f2c871bb0499c1ebd051a1111064c727bda58d1116418c475ecc5b4f8257ab3"
 }
 
 variable "ssh_public_key_path" {
