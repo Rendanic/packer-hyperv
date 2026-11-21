@@ -12,8 +12,7 @@ param(
     [string]$DNS1 = "8.8.8.8",             # Primary DNS
     [string]$DNS2 = "8.8.4.4",             # Secondary DNS
     [int]$CPUs = 2,
-    [int]$MemoryGB = 8,                     # Dynamic memory maximum = 2 x MemoryGB
-    [int]$StartupMemoryGB = 3,              # RAM assigned at boot (also the dynamic memory minimum)
+    [int]$MemoryGB = 8,                     # Fixed (static) RAM, fully reserved at VM start
     [string]$SSHUser = "ol",                # User created by the kickstart
     [string]$SSHKeyPath = "$env:USERPROFILE\.ssh\id_ed25519"
 )
@@ -63,18 +62,18 @@ Copy-Item -Path $vhdxFile.FullName -Destination $newVHDPath -Force
 # so the VM must be Generation 1 as well - a Gen2 (UEFI) VM would not find a bootloader.
 Write-Host "Creating VM with Default Switch..." -ForegroundColor Yellow
 New-VM -Name $NewVMName `
-       -MemoryStartupBytes ($StartupMemoryGB * 1GB) `
+       -MemoryStartupBytes ($MemoryGB * 1GB) `
        -Generation 1 `
        -VHDPath $newVHDPath `
        -SwitchName "Default Switch" | Out-Null
 
 # Configure VM
+# Static memory: a fixed reservation. With dynamic memory the guest RAM changes at runtime and
+# the memlock limit derived from it (Oracle HugePages/limits) is not stable.
 Set-VM -Name $NewVMName `
        -ProcessorCount $CPUs `
-       -DynamicMemory `
-       -MemoryStartupBytes ($StartupMemoryGB * 1GB) `
-       -MemoryMinimumBytes ($StartupMemoryGB * 1GB) `
-       -MemoryMaximumBytes ([math]::Max($MemoryGB * 2, $StartupMemoryGB) * 1GB) `
+       -StaticMemory `
+       -MemoryStartupBytes ($MemoryGB * 1GB) `
        -CheckpointType Disabled
 
 # Add second network adapter for External Switch
