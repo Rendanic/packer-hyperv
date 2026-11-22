@@ -178,6 +178,15 @@ build {
     ]
   }
   
+  # sudo without password for the user: create-vm.ps1/configure-guest.ps1 (via SSH, BatchMode) and Ansible need it
+  provisioner "shell" {
+    inline = [
+      "echo '${var.ssh_username} ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/90-${var.ssh_username}",
+      "sudo chmod 440 /etc/sudoers.d/90-${var.ssh_username}",
+      "sudo visudo -c"
+    ]
+  }
+
   # Clean up
   provisioner "shell" {
     inline = [

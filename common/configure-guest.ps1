@@ -1,6 +1,6 @@
 # configure-guest.ps1
-# Sets the fixed IP on the external adapter and the host name inside an Oracle Linux guest via SSH
-# (NetworkManager / nmcli). Called by <template>/create-vm.ps1; can also run on its own, e.g. by an
+# Sets the fixed IP on the external adapter and the host name inside the guest via SSH
+# (NetworkManager / nmcli on Oracle Linux, netplan on Ubuntu). Called by <template>/create-vm.ps1; can also run on its own, e.g. by an
 # account without Hyper-V rights (create-vm.ps1 -SkipGuestConfig prints the values it needs).
 # Needs only the OpenSSH client (ssh, scp) and network access to DefaultIP (Default Switch).
 # Exit code 0 = configured, 1 = failed (the messages of ssh/scp are shown).
@@ -24,7 +24,7 @@ $extMac = $Mac.ToLower()
 
 Write-Host "Configuring fixed IP on external network (MAC $extMac)..." -ForegroundColor Yellow
 
-# Configuration script executed inside the guest (NetworkManager / nmcli)
+# Configuration script executed inside the guest (NetworkManager / nmcli or netplan)
 $guestScript = @"
 #!/bin/bash
 set -euo pipefail
@@ -36,20 +36,42 @@ if [ -z "`$IFACE" ]; then
 fi
 echo "External interface: `$IFACE"
 
-# Remove auto-generated connections bound to that interface
-for uuid in `$(nmcli -g UUID,DEVICE connection show | awk -F: -v dev="`$IFACE" '`$2 == dev { print `$1 }'); do
-  nmcli connection delete "`$uuid"
-done
-nmcli connection delete external 2>/dev/null || true
+if command -v nmcli >/dev/null 2>&1 && systemctl is-active --quiet NetworkManager; then
+  # Oracle Linux: NetworkManager
+  # Remove auto-generated connections bound to that interface
+  for uuid in `$(nmcli -g UUID,DEVICE connection show | awk -F: -v dev="`$IFACE" '`$2 == dev { print `$1 }'); do
+    nmcli connection delete "`$uuid"
+  done
+  nmcli connection delete external 2>/dev/null || true
 
-nmcli connection add type ethernet con-name external ifname "`$IFACE" \
-  ipv4.method manual \
-  ipv4.addresses $FixedIP/$Subnet \
-  ipv4.dns "$DNS1 $DNS2" \
-  ipv4.never-default yes \
-  ipv6.method disabled \
-  connection.autoconnect yes
-nmcli connection up external
+  nmcli connection add type ethernet con-name external ifname "`$IFACE" \
+    ipv4.method manual \
+    ipv4.addresses $FixedIP/$Subnet \
+    ipv4.dns "$DNS1 $DNS2" \
+    ipv4.never-default yes \
+    ipv6.method disabled \
+    connection.autoconnect yes
+  nmcli connection up external
+else
+  # Ubuntu: netplan (systemd-networkd). Own file, matched by MAC; no default route (like ipv4.never-default).
+  cat > /etc/netplan/60-external.yaml <<NETPLAN
+network:
+  version: 2
+  ethernets:
+    external:
+      match:
+        macaddress: $extMac
+      dhcp4: false
+      dhcp6: false
+      addresses: [$FixedIP/$Subnet]
+      nameservers:
+        addresses: [$DNS1, $DNS2]
+NETPLAN
+  chmod 600 /etc/netplan/60-external.yaml
+  netplan apply
+  # cloud-init (cleaned seed) must not reset the host name at the next boot
+  echo "preserve_hostname: true" > /etc/cloud/cloud.cfg.d/99-preserve-hostname.cfg
+fi
 
 hostnamectl set-hostname $Hostname
 sed -i '/[[:space:]]$Hostname\([[:space:]]\|`$\)/d' /etc/hosts

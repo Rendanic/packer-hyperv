@@ -1,0 +1,186 @@
+# create-vm.ps1
+# Creates an Ubuntu 26.04 VM from the packer template with two network adapters:
+#   Default Switch (DHCP, management) + External Switch (fixed IP via netplan, see common/configure-guest.ps1)
+# The image is built as Generation 2 (UEFI, Secure Boot off), unlike the Oracle Linux templates (Generation 1).
+
+param(
+    [string]$OutputDir = "output-ubuntu-base",
+    [string]$NewVMName = "k3s-1",
+    [string]$Hostname = "k3s-1", # Short name, FQDN becomes <Hostname>.<FixedIP>.nip.io
+    [string]$ExternalSwitch = "intern_66",  # Name of your external switch
+    [string]$FixedIP = "192.168.66.10",     # Fixed IP on the external switch
+    [string]$Subnet = "24",                 # Subnet mask in CIDR notation
+    [string]$DNS1 = "8.8.8.8",             # Primary DNS
+    [string]$DNS2 = "8.8.4.4",             # Secondary DNS
+    [int]$CPUs = 2,
+    [int]$MemoryGB = 8,                     # Fixed (static) RAM, fully reserved at VM start
+    [int]$DataDiskGB = 0,                   # >0 adds an empty data disk on the SCSI controller (/dev/sdb)
+    [string]$SSHUser = "ubuntu",            # User created by the autoinstall (ubuntu-26.04/http/user-data)
+    [string]$SSHKeyPath = "$env:USERPROFILE\.ssh\id_ed25519",
+    # Do not configure the guest via SSH; print the values for common/configure-guest.ps1 instead
+    # (line "GUEST_CONFIG ..."), e.g. when the caller cannot use ssh (JEA virtual account).
+    [switch]$SkipGuestConfig
+)
+
+$ErrorActionPreference = "Stop"
+
+# Use VM name as hostname if not specified
+if ([string]::IsNullOrEmpty($Hostname)) {
+    $Hostname = $NewVMName
+}
+
+# Hostname is always a nip.io name derived from the fixed IP:
+#   db1 + 192.168.66.162 -> db1.192-168-66-162.nip.io
+$ipDashed = $FixedIP.Replace('.', '-')
+$ShortName = ($Hostname -split '\.')[0]
+if ($ShortName.EndsWith("-$ipDashed")) {
+    $ShortName = $ShortName.Substring(0, $ShortName.Length - $ipDashed.Length - 1)
+}
+$Hostname = "$ShortName.$ipDashed.nip.io"
+
+Write-Host "Creating VM '$NewVMName' with dual network configuration" -ForegroundColor Cyan
+Write-Host "  Default Switch: DHCP" -ForegroundColor Gray
+Write-Host "  $ExternalSwitch : $FixedIP/$Subnet" -ForegroundColor Gray
+
+# Find the VHDX file
+$vhdxFile = Get-ChildItem -Path $OutputDir -Filter "*.vhdx" -Recurse | Select-Object -First 1
+if (-not $vhdxFile) {
+    Write-Host "No VHDX file found in $OutputDir" -ForegroundColor Red
+    exit 1
+}
+
+# Remove existing VM if present
+if (Get-VM -Name $NewVMName -ErrorAction SilentlyContinue) {
+    Stop-VM -Name $NewVMName -Force -TurnOff -ErrorAction SilentlyContinue
+    Remove-VM -Name $NewVMName -Force
+}
+
+# Create VM directory and copy VHDX
+$vmPath = Join-Path (Get-VMHost).VirtualMachinePath $NewVMName
+New-Item -ItemType Directory -Path $vmPath -Force | Out-Null
+$newVHDPath = Join-Path $vmPath "$NewVMName.vhdx"
+Write-Host "Copying VHDX..." -ForegroundColor Yellow
+Copy-Item -Path $vhdxFile.FullName -Destination $newVHDPath -Force
+
+# The packer template is built as Generation 2 (UEFI, see enable_secure_boot = false),
+# so the VM must be Generation 2 as well - a Gen1 (BIOS) VM would not find a bootloader.
+Write-Host "Creating VM with Default Switch..." -ForegroundColor Yellow
+New-VM -Name $NewVMName `
+       -MemoryStartupBytes ($MemoryGB * 1GB) `
+       -Generation 2 `
+       -VHDPath $newVHDPath `
+       -SwitchName "Default Switch" | Out-Null
+
+# Configure VM
+# Static memory: a fixed reservation. With dynamic memory the guest RAM changes at runtime and
+# the memlock limit derived from it (Oracle HugePages/limits) is not stable.
+Set-VM -Name $NewVMName `
+       -ProcessorCount $CPUs `
+       -StaticMemory `
+       -MemoryStartupBytes ($MemoryGB * 1GB) `
+       -CheckpointType Disabled
+
+# The Ubuntu image is not signed for the Microsoft UEFI CA template: Secure Boot off (as in the packer build)
+Set-VMFirmware -VMName $NewVMName -EnableSecureBoot Off
+
+# Add second network adapter for External Switch
+Write-Host "Adding External network adapter..." -ForegroundColor Yellow
+Add-VMNetworkAdapter -VMName $NewVMName -SwitchName $ExternalSwitch -Name "External"
+
+# Optional empty data disk (dynamic VHDX), stays unpartitioned in the guest.
+# Generation 2 has no IDE controller: boot disk and data disk are on the SCSI controller (boot = /dev/sda,
+# data = /dev/sdb, scanned in order on one controller).
+# It lives in the VM directory, so removing the VM directory removes it as well.
+if ($DataDiskGB -gt 0) {
+    $dataVHDPath = Join-Path $vmPath "$NewVMName-data1.vhdx"
+    Write-Host "Adding data disk ($DataDiskGB GB)..." -ForegroundColor Yellow
+    if (Test-Path $dataVHDPath) {
+        Remove-Item -Path $dataVHDPath -Force
+    }
+    New-VHD -Path $dataVHDPath -SizeBytes ($DataDiskGB * 1GB) -Dynamic | Out-Null
+    Add-VMHardDiskDrive -VMName $NewVMName -ControllerType SCSI -ControllerNumber 0 -ControllerLocation 1 -Path $dataVHDPath
+}
+
+# Start the VM
+Write-Host "Starting VM..." -ForegroundColor Yellow
+Start-VM -Name $NewVMName
+
+# Wait for Default Switch IP (reported by hypervkvpd from hyperv-daemons)
+Write-Host "Waiting for Default Switch IP..." -ForegroundColor Gray
+$attempts = 0
+$maxAttempts = 90
+$defaultIP = $null
+
+while ($attempts -lt $maxAttempts -and -not $defaultIP) {
+    Start-Sleep -Seconds 2
+    $defaultAdapter = Get-VMNetworkAdapter -VMName $NewVMName | Where-Object { $_.SwitchName -eq "Default Switch" }
+    if ($defaultAdapter.IPAddresses.Count -gt 0) {
+        $defaultIP = $defaultAdapter.IPAddresses |
+                     Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' -and $_ -notmatch '^169\.254\.' } |
+                     Select-Object -First 1
+    }
+    $attempts++
+}
+
+if (-not $defaultIP) {
+    Write-Host "Failed to get Default Switch IP" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "Default Switch IP: $defaultIP" -ForegroundColor Green
+
+# Wait for SSH port to be reachable
+Write-Host "Waiting for SSH..." -ForegroundColor Gray
+$sshReady = $false
+for ($i = 0; $i -lt 60 -and -not $sshReady; $i++) {
+    $tcp = New-Object System.Net.Sockets.TcpClient
+    try {
+        $tcp.Connect($defaultIP, 22)
+        $sshReady = $true
+    } catch {
+        Start-Sleep -Seconds 2
+    } finally {
+        $tcp.Dispose()
+    }
+}
+if (-not $sshReady) {
+    Write-Host "SSH on $defaultIP not reachable" -ForegroundColor Red
+    exit 1
+}
+
+# MAC address of the external adapter (Hyper-V format 00155D010203 -> 00:15:5d:01:02:03),
+# used to find the matching interface inside the guest regardless of its name
+$extMac = (Get-VMNetworkAdapter -VMName $NewVMName -Name "External").MacAddress
+$extMac = ($extMac -split '(..)' -ne '' -join ':').ToLower()
+
+if ($SkipGuestConfig) {
+    Write-Host "Guest configuration skipped (-SkipGuestConfig), run common/configure-guest.ps1 with:" -ForegroundColor Yellow
+    # machine-readable, one line, no spaces in the values
+    Write-Output ("GUEST_CONFIG DefaultIP=$defaultIP Mac=$extMac FixedIP=$FixedIP Subnet=$Subnet " +
+                  "DNS1=$DNS1 DNS2=$DNS2 Hostname=$Hostname ShortName=$ShortName")
+} else {
+    # Same code for all templates: common/configure-guest.ps1 (failure = warning, as before)
+    & (Join-Path $PSScriptRoot "..\common\configure-guest.ps1") -DefaultIP $defaultIP -Mac $extMac `
+        -FixedIP $FixedIP -Subnet $Subnet -DNS1 $DNS1 -DNS2 $DNS2 -Hostname $Hostname -ShortName $ShortName `
+        -SSHUser $SSHUser -SSHKeyPath $SSHKeyPath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Manual configuration needed." -ForegroundColor Yellow
+    }
+}
+
+# Display summary
+Write-Host "`n========================================" -ForegroundColor Green
+Write-Host "VM Created with Dual Network!" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "VM Name:        $NewVMName" -ForegroundColor White
+Write-Host "Hostname:       $Hostname" -ForegroundColor White
+Write-Host "Default Switch: $defaultIP (DHCP)" -ForegroundColor Cyan
+Write-Host "External:       $FixedIP/$Subnet (Fixed)" -ForegroundColor Cyan
+Write-Host "DNS:            $DNS1, $DNS2" -ForegroundColor White
+if ($DataDiskGB -gt 0) {
+    Write-Host "Data disk:      $DataDiskGB GB, unpartitioned, /dev/sdb ($dataVHDPath)" -ForegroundColor White
+}
+Write-Host "`nSSH Access:" -ForegroundColor Yellow
+Write-Host "  Via Default: ssh -i $SSHKeyPath $SSHUser@$defaultIP" -ForegroundColor Gray
+Write-Host "  Via Fixed:   ssh -i $SSHKeyPath $SSHUser@$FixedIP" -ForegroundColor Gray
+Write-Host "  Via nip.io:  ssh -i $SSHKeyPath $SSHUser@$Hostname" -ForegroundColor Gray
