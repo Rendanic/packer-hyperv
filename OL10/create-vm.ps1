@@ -14,11 +14,13 @@ param(
     [int]$CPUs = 2,
     [int]$MemoryGB = 8,                     # Fixed (static) RAM, fully reserved at VM start
     [string]$SSHUser = "ol",                # User created by the kickstart
-    [string]$SSHKeyPath = "$env:USERPROFILE\.ssh\id_ed25519"
+    [string]$SSHKeyPath = "$env:USERPROFILE\.ssh\id_ed25519",
+    # Do not configure the guest via SSH; print the values for common/configure-guest.ps1 instead
+    # (line "GUEST_CONFIG ..."), e.g. when the caller cannot use ssh (JEA virtual account).
+    [switch]$SkipGuestConfig
 )
 
 $ErrorActionPreference = "Stop"
-$sshOpts = @("-i", $SSHKeyPath, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "BatchMode=yes", "-o", "LogLevel=ERROR")
 
 # Use VM name as hostname if not specified
 if ([string]::IsNullOrEmpty($Hostname)) {
@@ -132,61 +134,19 @@ if (-not $sshReady) {
 $extMac = (Get-VMNetworkAdapter -VMName $NewVMName -Name "External").MacAddress
 $extMac = ($extMac -split '(..)' -ne '' -join ':').ToLower()
 
-Write-Host "Configuring fixed IP on external network (MAC $extMac)..." -ForegroundColor Yellow
-
-# Configuration script executed inside the guest (NetworkManager / nmcli)
-$guestScript = @"
-#!/bin/bash
-set -euo pipefail
-
-IFACE=`$(ip -o link | awk -v mac='$extMac' 'tolower(`$0) ~ mac { sub(":", "", `$2); print `$2; exit }')
-if [ -z "`$IFACE" ]; then
-  echo "No interface with MAC $extMac found" >&2
-  exit 1
-fi
-echo "External interface: `$IFACE"
-
-# Remove auto-generated connections bound to that interface
-for uuid in `$(nmcli -g UUID,DEVICE connection show | awk -F: -v dev="`$IFACE" '`$2 == dev { print `$1 }'); do
-  nmcli connection delete "`$uuid"
-done
-nmcli connection delete external 2>/dev/null || true
-
-nmcli connection add type ethernet con-name external ifname "`$IFACE" \
-  ipv4.method manual \
-  ipv4.addresses $FixedIP/$Subnet \
-  ipv4.dns "$DNS1 $DNS2" \
-  ipv4.never-default yes \
-  ipv6.method disabled \
-  connection.autoconnect yes
-nmcli connection up external
-
-hostnamectl set-hostname $Hostname
-sed -i '/[[:space:]]$Hostname\([[:space:]]\|`$\)/d' /etc/hosts
-echo "$FixedIP $Hostname $ShortName" >> /etc/hosts
-"@
-
-# Write with LF line endings and without BOM, otherwise bash fails
-$tempFile = [System.IO.Path]::GetTempFileName()
-[System.IO.File]::WriteAllText($tempFile, ($guestScript -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding $false))
-
-try {
-    Write-Host "Copying network configuration script..." -ForegroundColor Gray
-    & scp @sshOpts $tempFile "${SSHUser}@${defaultIP}:/tmp/configure-network.sh"
-    if ($LASTEXITCODE -ne 0) { throw "scp failed" }
-
-    Write-Host "Applying configuration..." -ForegroundColor Gray
-    & ssh @sshOpts "${SSHUser}@${defaultIP}" "sudo bash /tmp/configure-network.sh && rm -f /tmp/configure-network.sh"
-
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Network and hostname configured successfully!" -ForegroundColor Green
-    } else {
-        Write-Host "Configuration may have failed, please check manually" -ForegroundColor Yellow
+if ($SkipGuestConfig) {
+    Write-Host "Guest configuration skipped (-SkipGuestConfig), run common/configure-guest.ps1 with:" -ForegroundColor Yellow
+    # machine-readable, one line, no spaces in the values
+    Write-Output ("GUEST_CONFIG DefaultIP=$defaultIP Mac=$extMac FixedIP=$FixedIP Subnet=$Subnet " +
+                  "DNS1=$DNS1 DNS2=$DNS2 Hostname=$Hostname ShortName=$ShortName")
+} else {
+    # Same code for all templates: common/configure-guest.ps1 (failure = warning, as before)
+    & (Join-Path $PSScriptRoot "..\common\configure-guest.ps1") -DefaultIP $defaultIP -Mac $extMac `
+        -FixedIP $FixedIP -Subnet $Subnet -DNS1 $DNS1 -DNS2 $DNS2 -Hostname $Hostname -ShortName $ShortName `
+        -SSHUser $SSHUser -SSHKeyPath $SSHKeyPath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Manual configuration needed." -ForegroundColor Yellow
     }
-} catch {
-    Write-Host "Could not configure via SSH ($_). Manual configuration needed." -ForegroundColor Yellow
-} finally {
-    Remove-Item -Path $tempFile -Force -ErrorAction SilentlyContinue
 }
 
 # Display summary

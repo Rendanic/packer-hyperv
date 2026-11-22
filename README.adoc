@@ -43,3 +43,9 @@ scoop install task
 === Preparation
 
 Through the automated installation, the VMs receive a configurable SSH public key that can later be used for login. Currently, the key is still hardcoded in the Packer template, but it will be configurable via a parameter in the future.
+
+== Creating VMs
+
+`<template>/create-vm.ps1` (OL8, OL9, OL10) creates a VM from the image of the template: copy of the VHDX, two network adapters (Default Switch with DHCP, external switch with a fixed IP), static memory, optional data disk. Afterwards `common/configure-guest.ps1` sets the fixed IP and the host name inside the guest via SSH (`<name>.<ip with dashes>.nip.io`).
+
+`-SkipGuestConfig` leaves out the SSH step and prints the values for `common/configure-guest.ps1` in one line (`GUEST_CONFIG DefaultIP=... Mac=... FixedIP=... Hostname=... ShortName=...`). This is for callers that cannot use the OpenSSH client themselves, e.g. a JEA virtual account (Windows OpenSSH does not know these accounts: `unknown user`); another account then runs `common/configure-guest.ps1`.
