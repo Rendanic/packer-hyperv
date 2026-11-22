@@ -19,7 +19,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$sshOpts = @("-i", $SSHKeyPath, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "BatchMode=yes", "-o", "LogLevel=ERROR")
+$sshOpts = @("-i", $SSHKeyPath, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "BatchMode=yes", "-o", "LogLevel=ERROR",
+             "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3")
 $extMac = $Mac.ToLower()
 
 Write-Host "Configuring fixed IP on external network (MAC $extMac)..." -ForegroundColor Yellow
@@ -68,7 +69,11 @@ network:
         addresses: [$DNS1, $DNS2]
 NETPLAN
   chmod 600 /etc/netplan/60-external.yaml
-  netplan apply
+  # Not "netplan apply": it renews the DHCP lease of the management adapter (Default Switch gives a new
+  # address), which kills this SSH session. Only reconfigure the external interface.
+  netplan generate
+  networkctl reload
+  networkctl reconfigure `$IFACE
   # cloud-init (cleaned seed) must not reset the host name at the next boot
   echo "preserve_hostname: true" > /etc/cloud/cloud.cfg.d/99-preserve-hostname.cfg
 fi
