@@ -46,6 +46,40 @@ scoop install task
 
 Through the automated installation, the VMs receive a configurable SSH public key that can later be used for login. Currently, the key is still hardcoded in the Packer template, but it will be configurable via a parameter in the future.
 
+== Creating a VM
+
+Each Oracle Linux directory contains a `create-vm.ps1`, which creates a Hyper-V VM from the built image (Generation 1) with two network adapters:
+
+- `Default Switch` with DHCP for management
+- an external switch with a fixed IP, configured with NetworkManager
+
+The hostname is always a nip.io name derived from the fixed IP, e.g. `db1` + `192.168.66.162` -> `db1.192-168-66-162.nip.io`.
+An existing VM with the same name is removed and created again.
+
+.Create a VM with the defaults
+----
+.\OL9\create-vm.ps1 -NewVMName db1 -Hostname db1 -FixedIP 192.168.66.162
+----
+
+=== Additional data disks
+
+`-DataDiskGB` adds dynamic VHDX disks on the SCSI controller, e.g. for ASM.
+The boot disk stays on IDE 0:0, so the data disks appear in the guest as `/dev/sdb`, `/dev/sdc` and so on.
+At the end, the script shows the block devices of the guest (`lsblk`).
+
+Data disks are always created empty.
+Existing data disks of the VM (`<VMName>-data<N>.vhdx`) are deleted first, so no old ASM headers remain.
+
+.VM with one additional 50 GB disk and 12 GB fixed memory
+----
+.\OL9\create-vm.ps1 -NewVMName restart -Hostname restart -FixedIP 192.168.66.171 `
+    -CPUs 2 -StartupMemoryGB 12 -MemoryGB 6 -DataDiskGB 50
+----
+
+The maximum of the dynamic memory is `max(2 x MemoryGB, StartupMemoryGB)`.
+With `-StartupMemoryGB 12 -MemoryGB 6`, the VM has 12 GB from the start.
+Use this for software whose prerequisite checks need the full memory at boot time, e.g. Oracle Grid Infrastructure.
+
 == Updates with Renovate
 
 NOTE: This chapter is only relevant for maintaining this project, not for building images.
