@@ -1,6 +1,10 @@
 # create-vm.ps1
 # Creates an Oracle Linux 8 VM from the packer template with two network adapters:
 #   Default Switch (DHCP, management) + External Switch (fixed IP via NetworkManager)
+# Optional additional data disks (e.g. for ASM) via -DataDiskGB:
+#   -DataDiskGB 50       -> one dynamic 50 GB VHDX on SCSI 0:0 (/dev/sdb in the guest)
+#   -DataDiskGB 50,50    -> two disks on SCSI 0:0 and 0:1
+#   Existing data disks of the VM are deleted and recreated empty.
 
 param(
     [string]$OutputDir = "output-ol8",
@@ -13,9 +17,9 @@ param(
     [string]$DNS2 = "8.8.4.4",             # Secondary DNS
     [int]$CPUs = 2,
     [int]$MemoryGB = 8,                     # Fixed (static) RAM, fully reserved at VM start
-    [int]$DataDiskGB = 0,                   # >0 adds an empty data disk (e.g. for ASM) at IDE 0:1 (/dev/sdb)
     [string]$SSHUser = "ol",                # User created by the kickstart
     [string]$SSHKeyPath = "$env:USERPROFILE\.ssh\id_ed25519",
+    [int[]]$DataDiskGB = @(),               # Sizes in GB of additional data disks (SCSI), empty = none
     # Do not configure the guest via SSH; print the values for common/configure-guest.ps1 instead
     # (line "GUEST_CONFIG ..."), e.g. when the caller cannot use ssh (JEA virtual account).
     [switch]$SkipGuestConfig
@@ -79,25 +83,29 @@ Set-VM -Name $NewVMName `
        -MemoryStartupBytes ($MemoryGB * 1GB) `
        -CheckpointType Disabled
 
+# Add data disks on the SCSI controller.
+# The boot disk stays on IDE 0:0 (Generation 1), the data disks appear in the guest as /dev/sdb, /dev/sdc, ...
+$dataDisks = @()
+if ($DataDiskGB.Count -gt 0) {
+    if (-not (Get-VMScsiController -VMName $NewVMName)) {
+        Add-VMScsiController -VMName $NewVMName
+    }
+    for ($i = 0; $i -lt $DataDiskGB.Count; $i++) {
+        $diskPath = Join-Path $vmPath ("{0}-data{1}.vhdx" -f $NewVMName, ($i + 1))
+        # Never reuse an old disk: leftover ASM headers would break a new installation
+        if (Test-Path $diskPath) {
+            Remove-Item -Path $diskPath -Force
+        }
+        Write-Host ("Adding data disk {0} GB (SCSI 0:{1})..." -f $DataDiskGB[$i], $i) -ForegroundColor Yellow
+        New-VHD -Path $diskPath -SizeBytes ($DataDiskGB[$i] * 1GB) -Dynamic | Out-Null
+        Add-VMHardDiskDrive -VMName $NewVMName -ControllerType SCSI -ControllerNumber 0 -ControllerLocation $i -Path $diskPath
+        $dataDisks += [pscustomobject]@{ Path = $diskPath; SizeGB = $DataDiskGB[$i]; Location = "SCSI 0:$i" }
+    }
+}
+
 # Add second network adapter for External Switch
 Write-Host "Adding External network adapter..." -ForegroundColor Yellow
 Add-VMNetworkAdapter -VMName $NewVMName -SwitchName $ExternalSwitch -Name "External"
-
-# Optional empty data disk (dynamic VHDX), stays unpartitioned in the guest.
-# It is attached to the same IDE controller as the boot disk (IDE 0:1), NOT to a SCSI controller:
-# Linux probes the IDE and SCSI storvsc hosts in parallel, so with a SCSI disk the device names
-# race and the data disk may become /dev/sda. On one controller the disks are scanned in order:
-# boot disk = /dev/sda, data disk = /dev/sdb. (IDE disks also use the fast hv_storvsc path.)
-# It lives in the VM directory, so removing the VM directory removes it as well.
-if ($DataDiskGB -gt 0) {
-    $dataVHDPath = Join-Path $vmPath "$NewVMName-data1.vhdx"
-    Write-Host "Adding data disk ($DataDiskGB GB)..." -ForegroundColor Yellow
-    if (Test-Path $dataVHDPath) {
-        Remove-Item -Path $dataVHDPath -Force
-    }
-    New-VHD -Path $dataVHDPath -SizeBytes ($DataDiskGB * 1GB) -Dynamic | Out-Null
-    Add-VMHardDiskDrive -VMName $NewVMName -ControllerType IDE -ControllerNumber 0 -ControllerLocation 1 -Path $dataVHDPath
-}
 
 # Start the VM
 Write-Host "Starting VM..." -ForegroundColor Yellow
@@ -166,6 +174,13 @@ if ($SkipGuestConfig) {
     }
 }
 
+# Show the block devices of the guest, so the device names of the data disks are visible
+$guestDisks = $null
+if ($dataDisks.Count -gt 0 -and -not $SkipGuestConfig) {
+    $guestDisks = & ssh @sshOpts "${SSHUser}@${defaultIP}" "lsblk -dno NAME,SIZE,TYPE"
+    if ($LASTEXITCODE -ne 0) { $guestDisks = $null }
+}
+
 # Display summary
 Write-Host "`n========================================" -ForegroundColor Green
 Write-Host "VM Created with Dual Network!" -ForegroundColor Green
@@ -175,8 +190,12 @@ Write-Host "Hostname:       $Hostname" -ForegroundColor White
 Write-Host "Default Switch: $defaultIP (DHCP)" -ForegroundColor Cyan
 Write-Host "External:       $FixedIP/$Subnet (Fixed)" -ForegroundColor Cyan
 Write-Host "DNS:            $DNS1, $DNS2" -ForegroundColor White
-if ($DataDiskGB -gt 0) {
-    Write-Host "Data disk:      $DataDiskGB GB, unpartitioned, /dev/sdb ($dataVHDPath)" -ForegroundColor White
+foreach ($d in $dataDisks) {
+    Write-Host ("Data disk:      {0} GB {1} {2}" -f $d.SizeGB, $d.Location, $d.Path) -ForegroundColor White
+}
+if ($guestDisks) {
+    Write-Host "`nBlock devices in the guest (lsblk):" -ForegroundColor Yellow
+    $guestDisks | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
 }
 Write-Host "`nSSH Access:" -ForegroundColor Yellow
 Write-Host "  Via Default: ssh -i $SSHKeyPath $SSHUser@$defaultIP" -ForegroundColor Gray

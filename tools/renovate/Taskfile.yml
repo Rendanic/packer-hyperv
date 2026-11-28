@@ -1,0 +1,119 @@
+# Taskfile.yml
+# Renovate on the CLI (Linux/WSL, needs docker), same image as the renovate-bot job in GitLab.
+# check: lookup only against the working tree, nothing is changed.
+# dry-run / run: renovate against the github repository - run creates branches and PRs there.
+version: '3'
+
+vars:
+  RENOVATE_IMAGE: '{{.RENOVATE_IMAGE | default "ghcr.io/renovatebot/renovate:44"}}'
+  RENOVATE_REPORT: .renovate-report.json
+  REPO: '{{.REPO | default "Rendanic/packer-hyperv"}}'
+  BASE: '{{.BASE | default "main"}}'
+  # renovate in docker: working tree as /repo, clones and cache in ~/.cache/renovate-docker,
+  # running as the current user (report file and cache belong to the user),
+  # mkdir first: docker would create a missing cache dir as root
+  DOCKER_RUN: >-
+    mkdir -p "{{.HOME}}/.cache/renovate-docker" &&
+    docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp
+    -v "{{.ROOT_DIR}}:/repo" -w /repo
+    -v "{{.HOME}}/.cache/renovate-docker:/cache" -e RENOVATE_BASE_DIR=/cache
+    -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'
+
+tasks:
+  validate:
+    desc: Validate renovate.json
+    platforms: [linux, darwin]
+    cmds:
+      - '{{.DOCKER_RUN}} --entrypoint renovate-config-validator {{.RENOVATE_IMAGE}} --strict renovate.json'
+
+  check:
+    desc: Check the ISO images in the packer templates for updates (lookup only, working tree - renovate.json must be tracked by git)
+    platforms: [linux, darwin]
+    cmds:
+      - task: lookup
+      - task: report
+
+  lookup:
+    internal: true
+    vars:
+      # github token: RENOVATE_TOKEN from the environment, otherwise from gh (also via nix-shell)
+      GITHUB_TOKEN: &github_token
+        sh: |
+          if [ -n "${RENOVATE_TOKEN:-}" ] ; then printf '%s' "$RENOVATE_TOKEN"
+          elif command -v gh >/dev/null ; then gh auth token 2>/dev/null || true
+          elif command -v nix-shell >/dev/null ; then nix-shell -p gh --run 'gh auth token' 2>/dev/null || true
+          fi
+    preconditions:
+      - sh: git ls-files --error-unmatch renovate.json >/dev/null 2>&1
+        msg: renovate.json is not tracked by git - renovate on platform local ignores it ('git add renovate.json')
+    env:
+      LOG_LEVEL: '{{.LOG_LEVEL | default "warn"}}'
+      GITHUB_COM_TOKEN: '{{.GITHUB_TOKEN}}'
+    cmds:
+      - >-
+        {{.DOCKER_RUN}} -e LOG_LEVEL -e GITHUB_COM_TOKEN
+        -e RENOVATE_PLATFORM=local -e RENOVATE_ONBOARDING=false -e RENOVATE_DRY_RUN=lookup
+        -e RENOVATE_REPORT_TYPE=file -e RENOVATE_REPORT_PATH={{.RENOVATE_REPORT}}
+        {{.RENOVATE_IMAGE}}
+
+  report:
+    desc: Show updates from the last 'check' (ONLY_UPDATES=false shows all dependencies)
+    platforms: [linux, darwin]
+    preconditions:
+      - test -f {{.RENOVATE_REPORT}}
+    cmds:
+      - |
+        {{.DOCKER_RUN}} --entrypoint jq {{.RENOVATE_IMAGE}} -r '
+          .repositories[].packageFiles
+          | to_entries[] | .key as $mgr | .value[]
+          | .packageFile as $file | .deps[]
+          | ([ .updates[]? | "\(.newValue // .newDigest[0:12]) (\(.updateType))" ] | join(", ")) as $upd
+          {{if ne (.ONLY_UPDATES | default "true") "false"}}| select($upd != ""){{end}}
+          | [ $file, .depName, (.currentValue // "-"),
+              (if $upd != "" then $upd else (.skipReason // "up-to-date") end) ]
+          | @tsv' {{.RENOVATE_REPORT}} \
+        | sort | column -t -s $'\t' -N FILE,DEPENDENCY,CURRENT,UPDATES
+
+  iso:check:
+    desc: Compare iso_checksum in the packer templates with the official checksum lists
+    platforms: [linux, darwin]
+    cmds:
+      - tools/renovate/iso_checksum.sh --check */*.pkr.hcl
+
+  dry-run:
+    desc: Show what renovate would do on the github repository (REPO, BASE) - renovate.json is read from BASE
+    platforms: [linux, darwin]
+    cmds:
+      - task: run:github
+        vars: {DRY_RUN: full}
+
+  run:
+    desc: Run renovate on the github repository - creates branches and PRs (REPO, BASE)
+    platforms: [linux, darwin]
+    prompt: Create renovate branches and PRs in {{.REPO}} ({{.BASE}})?
+    cmds:
+      - task: run:github
+
+  run:github:
+    internal: true
+    vars:
+      GITHUB_TOKEN: *github_token
+    preconditions:
+      - sh: '[ -n "{{.GITHUB_TOKEN}}" ]'
+        msg: login with 'gh auth login' (or 'nix-shell -p gh --run "gh auth login"') or set RENOVATE_TOKEN to a github token with write access to {{.REPO}}
+    env:
+      RENOVATE_TOKEN: '{{.GITHUB_TOKEN}}'
+      GITHUB_COM_TOKEN: '{{.GITHUB_TOKEN}}'
+      LOG_LEVEL: '{{.LOG_LEVEL | default "info"}}'
+      RENOVATE_REPOSITORIES: '["{{.REPO}}"]'
+      RENOVATE_BASE_BRANCH_PATTERNS: '["{{.BASE}}"]'
+      # no hourly PR limit for manual runs (config:recommended: 2 PRs per hour)
+      RENOVATE_FORCE: '{"prHourlyLimit": 0}'
+      # postUpgradeTasks in renovate.json: iso_checksum of a new ISO from the official checksum list
+      RENOVATE_ALLOWED_COMMANDS: '["^tools/renovate/iso_checksum\\.sh "]'
+    cmds:
+      - >-
+        {{.DOCKER_RUN}} -e RENOVATE_TOKEN -e GITHUB_COM_TOKEN -e LOG_LEVEL
+        -e RENOVATE_REPOSITORIES -e RENOVATE_BASE_BRANCH_PATTERNS -e RENOVATE_FORCE -e RENOVATE_ALLOWED_COMMANDS
+        -e RENOVATE_PLATFORM=github -e RENOVATE_REQUIRE_CONFIG=required -e RENOVATE_ONBOARDING=false
+        {{.RENOVATE_IMAGE}}{{if .DRY_RUN}} --dry-run={{.DRY_RUN}}{{end}}

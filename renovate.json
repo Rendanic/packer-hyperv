@@ -1,0 +1,61 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "packageRules": [
+    {
+      "description": "ISO images: iso_checksum is set by tools/renovate/iso_checksum.sh from the official checksum list of the new ISO",
+      "matchDatasources": ["custom.oracle-linux-iso", "custom.ubuntu-server-iso"],
+      "postUpgradeTasks": {
+        "commands": ["tools/renovate/iso_checksum.sh '{{{packageFile}}}'"],
+        "fileFilters": ["**/*.pkr.hcl"]
+      }
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "Oracle Linux DVD ISO in iso_url of the packer templates, version <release>.<update> (OL9/u5 = 9.5)",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)[^/]+\\.pkr\\.hcl$/"],
+      "matchStrings": [
+        "OracleLinux/OL(?<release>\\d+)/u(?<update>\\d+)/x86_64/OracleLinux-R\\d+-U\\d+-x86_64-dvd\\.iso"
+      ],
+      "currentValueTemplate": "{{{release}}}.{{{update}}}",
+      "depNameTemplate": "oracle-linux-{{{release}}}-iso",
+      "packageNameTemplate": "{{{release}}}",
+      "datasourceTemplate": "custom.oracle-linux-iso",
+      "versioningTemplate": "loose",
+      "autoReplaceStringTemplate": "OracleLinux/OL{{{replace '\\.\\d+$' '' newValue}}}/u{{{replace '^\\d+\\.' '' newValue}}}/x86_64/OracleLinux-R{{{replace '\\.\\d+$' '' newValue}}}-U{{{replace '^\\d+\\.' '' newValue}}}-x86_64-dvd.iso"
+    },
+    {
+      "description": "Ubuntu live server ISO in iso_url of the packer templates (mirror of releases.ubuntu.com), only point releases of the same series",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)[^/]+\\.pkr\\.hcl$/"],
+      "matchStrings": [
+        "/(?<currentValue>(?<series>\\d+\\.\\d+)(?:\\.\\d+)*)/ubuntu-[0-9.]+-live-server-amd64\\.iso"
+      ],
+      "depNameTemplate": "ubuntu-{{{series}}}-live-server-iso",
+      "packageNameTemplate": "{{{series}}}",
+      "datasourceTemplate": "custom.ubuntu-server-iso",
+      "versioningTemplate": "loose",
+      "autoReplaceStringTemplate": "/{{{newValue}}}/ubuntu-{{{newValue}}}-live-server-amd64.iso"
+    }
+  ],
+  "customDatasources": {
+    "oracle-linux-iso": {
+      "description": "Oracle Linux x86_64 DVD ISOs of a release (packageName = release, e.g. 9) from the ISO download page, version <release>.<update>: only updates within a release (OL8, OL9 and OL10 have their own templates)",
+      "defaultRegistryUrlTemplate": "https://yum.oracle.com/oracle-linux-isos.html",
+      "format": "plain",
+      "transformTemplates": [
+        "{ \"releases\": [ $distinct([ releases[$contains(version, /OracleLinux-R{{packageName}}-U[0-9]+-x86_64-dvd\\.iso/)].( $m := $match(version, /OracleLinux-R([0-9]+)-U([0-9]+)-x86_64-dvd\\.iso/)[0]; $m.groups[0] & \".\" & $m.groups[1] ) ]).{ \"version\": $ } ], \"homepage\": \"https://yum.oracle.com/oracle-linux-isos.html\" }"
+      ]
+    },
+    "ubuntu-server-iso": {
+      "description": "Ubuntu live server ISOs of a series (packageName = series, e.g. 24.04) from SHA256SUMS on releases.ubuntu.com",
+      "defaultRegistryUrlTemplate": "https://releases.ubuntu.com/{{packageName}}/SHA256SUMS",
+      "format": "plain",
+      "transformTemplates": [
+        "{ \"releases\": [ releases[$contains(version, /ubuntu-[0-9.]+-live-server-amd64\\.iso$/)].{ \"version\": $match(version, /ubuntu-([0-9.]+)-live-server-amd64\\.iso$/)[0].groups[0] } ], \"homepage\": \"https://releases.ubuntu.com/\" }"
+      ]
+    }
+  }
+}

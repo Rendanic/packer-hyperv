@@ -1,4 +1,6 @@
 = Packer for Hyper-V
+:toc:
+:toclevels: 2
 
 == Why this project?
 
@@ -44,8 +46,79 @@ scoop install task
 
 Through the automated installation, the VMs receive a configurable SSH public key that can later be used for login. Currently, the key is still hardcoded in the Packer template, but it will be configurable via a parameter in the future.
 
-== Creating VMs
+== Creating a VM
 
-`<template>/create-vm.ps1` (OL8, OL9, OL10) creates a VM from the image of the template: copy of the VHDX, two network adapters (Default Switch with DHCP, external switch with a fixed IP), static memory, optional data disk. Afterwards `common/configure-guest.ps1` sets the fixed IP and the host name inside the guest via SSH (`<name>.<ip with dashes>.nip.io`).
+Each Oracle Linux directory contains a `create-vm.ps1`, which creates a Hyper-V VM from the built image (Generation 1) with two network adapters:
 
-`-SkipGuestConfig` leaves out the SSH step and prints the values for `common/configure-guest.ps1` in one line (`GUEST_CONFIG DefaultIP=... Mac=... FixedIP=... Hostname=... ShortName=...`). This is for callers that cannot use the OpenSSH client themselves, e.g. a JEA virtual account (Windows OpenSSH does not know these accounts: `unknown user`); another account then runs `common/configure-guest.ps1`.
+- `Default Switch` with DHCP for management
+- an external switch with a fixed IP, configured with NetworkManager (`common/configure-guest.ps1`, via SSH)
+
+The hostname is always a nip.io name derived from the fixed IP, e.g. `db1` + `192.168.66.162` -> `db1.192-168-66-162.nip.io`.
+An existing VM with the same name is removed and created again.
+
+The memory is static (`-MemoryGB`, fully reserved at VM start): with dynamic memory the RAM of the guest changes at runtime and with it the memlock limit that is derived from it, which breaks idempotence.
+
+`-SkipGuestConfig` leaves out the SSH step and prints the values for `common/configure-guest.ps1` in one line (`GUEST_CONFIG DefaultIP=... Mac=... FixedIP=... Hostname=... ShortName=...`).
+This is for callers that cannot use the OpenSSH client themselves, e.g. a JEA virtual account (Windows OpenSSH does not know these accounts: `unknown user`); another account then runs `common/configure-guest.ps1`.
+
+.Create a VM with the defaults
+----
+.\OL9\create-vm.ps1 -NewVMName db1 -Hostname db1 -FixedIP 192.168.66.162
+----
+
+=== Additional data disks
+
+`-DataDiskGB` adds dynamic VHDX disks on the SCSI controller, e.g. for ASM.
+The boot disk stays on IDE 0:0, so the data disks appear in the guest as `/dev/sdb`, `/dev/sdc` and so on.
+At the end, the script shows the block devices of the guest (`lsblk`, not with `-SkipGuestConfig`).
+
+Data disks are always created empty.
+Existing data disks of the VM (`<VMName>-data<N>.vhdx`) are deleted first, so no old ASM headers remain.
+
+.VM with one additional 50 GB disk and 12 GB memory
+----
+.\OL9\create-vm.ps1 -NewVMName restart -Hostname restart -FixedIP 192.168.66.171 `
+    -CPUs 2 -MemoryGB 12 -DataDiskGB 50
+----
+
+The VM has the full memory from the start, as needed by software whose prerequisite checks look at the memory at boot time, e.g. Oracle Grid Infrastructure.
+
+== Updates with Renovate
+
+NOTE: This chapter is only relevant for maintaining this project, not for building images.
+Renovate keeps the ISO images used in the Packer templates up to date.
+
+https://docs.renovatebot.com/[Renovate] checks the ISO images in the Packer templates (`iso_url`) and creates pull requests for new versions (configuration: `renovate.json`).
+
+- Oracle Linux: new updates of the same release, e.g. OL9 U5 -> U8 (source: https://yum.oracle.com/oracle-linux-isos.html). OL8, OL9 and OL10 have their own templates, so there are no updates to the next release.
+- Ubuntu: new point releases of the same series, e.g. 24.04.3 -> 24.04.5 (source: `SHA256SUMS` on https://releases.ubuntu.com/).
+
+Renovate changes the URL. `tools/renovate/iso_checksum.sh` then sets `iso_checksum` from the official checksum list of the new ISO.
+
+=== Renovate on the CLI
+
+The tasks in `tools/renovate/Taskfile.yml` run Renovate in docker (Linux/WSL), with the same image as the scheduled job.
+A github token is taken from `RENOVATE_TOKEN` or from `gh auth token`.
+
+[cols="1,3"]
+|===
+|Task |Description
+
+|`task renovate:check`
+|Check the ISO images for updates (lookup only, working tree). `renovate.json` must be tracked by git.
+
+|`task renovate:report`
+|Show the result of the last check again (`ONLY_UPDATES=false` shows all ISO images).
+
+|`task renovate:iso:check`
+|Compare `iso_checksum` with the official checksum lists.
+
+|`task renovate:validate`
+|Validate `renovate.json`.
+
+|`task renovate:dry-run`
+|Show what Renovate would do in the github repository (`REPO`, `BASE`). `renovate.json` is read from `BASE`.
+
+|`task renovate:run`
+|Run Renovate in the github repository: creates branches and pull requests (asks before).
+|===
